@@ -60,7 +60,7 @@ circuit-interactive-tutor/
 
 将本仓库的 GitHub 链接发给 WorkBuddy，对它说：
 
-> 请帮我安装这个 skill：https://github.com/<你的用户名>/circuit-interactive-tutor
+> 请帮我安装这个 skill：https://github.com/weblwh/circuit-interactive-tutor
 
 WorkBuddy 会自动克隆并安装到 `~/.workbuddy/skills/circuit-interactive-tutor/`。
 
@@ -68,7 +68,7 @@ WorkBuddy 会自动克隆并安装到 `~/.workbuddy/skills/circuit-interactive-t
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/<你的用户名>/circuit-interactive-tutor.git
+git clone https://github.com/weblwh/circuit-interactive-tutor.git
 
 # 2. 复制到 WorkBuddy skills 目录
 cp -r circuit-interactive-tutor ~/.workbuddy/skills/
