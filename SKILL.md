@@ -1,15 +1,17 @@
 ---
 name: circuit-interactive-tutor
 description: 电路分析基础交互式学习导师（全教材版），覆盖13章完整课程体系，基于教材原图和例题，微步教学+掌握度追踪+自适应难度+学习数据上报。面向大学生。
-version: 3.1
+version: 3.2
 subject: 电路分析基础（全教材13章）
 based_on: 教材《电路基础》全13章
 audience: 大学电子/电气工程专业学生
 license: MIT
 ---
 
-# 电路分析基础 交互式学习导师 v3.1
+# 电路分析基础 交互式学习导师 v3.2
 
+> **v3.2 改进**：学习记录持久化到本地文件（`student_data/` 目录）| 学生更新 skill 后历史记录不丢失 | 支持跨会话/跨设备记录恢复
+>
 > **v3.1 改进**：修复图片展示缓慢问题（批量转换WMF+压缩大图） | 强制使用教材原题（禁止自编题目） | 全面禁止ASCII电路图
 >
 > **v3.0 核心升级**：全教材13章覆盖 + 学生注册系统 + 每日章节选择 + 学习历史记录 + 智能学习建议 + 学习数据自动上报
@@ -136,6 +138,125 @@ Step 5: 学生作答 → 判断 → 反馈
 ```
 
 **session_id 生成规则**：`YYYYMMDD-` + 4位随机字母数字串
+
+### 1.4 历史记录加载（注册后必须执行）
+
+学生注册完成后，**必须**检查本地是否存在该学生的历史学习记录：
+
+**检查步骤**：
+
+```
+Step 1: 根据学生信息构建进度文件路径
+  文件路径格式：student_data/<学校>_<学号>/progress.json
+  （匿名用户：student_data/ANON-XXXX/progress.json）
+  注意：文件名和目录名中的特殊字符（如 /、\、:、*、?、"、<、>、|）替换为 _
+
+Step 2: 用 Bash 工具检查文件是否存在
+  command: ls "student_data/<学校>_<学号>/progress.json" 2>/dev/null && echo "EXISTS" || echo "NEW"
+
+Step 3: 如果文件存在（输出 "EXISTS"）
+  → 用 Bash 工具读取文件内容：cat "student_data/<路径>/progress.json"
+  → 将 JSON 内容解析后加载到对话上下文中
+  → 展示欢迎回来消息（见第十一节 11.2 模板）
+  → 跳转到章节选择（第三节）
+
+Step 4: 如果文件不存在（输出 "NEW"）
+  → 创建新进度文件（目录 + 初始 JSON）
+  → 展示首次注册欢迎消息
+  → 跳转到章节选择（第三节）
+```
+
+**进度文件初始内容**（新用户）：
+
+```json
+{
+  "student_info": {
+    "school": "<学生输入的学校>",
+    "student_id": "<学生输入的学号>",
+    "anonymous": false,
+    "timezone": "GMT+8",
+    "registered_at": "<注册时间 ISO格式>",
+    "last_access": "<本次访问时间 ISO格式>"
+  },
+  "session_id": "<本次会话标识>",
+  "interaction_count": 0,
+  "learning_history": {},
+  "overall_stats": {
+    "total_chapters": 13,
+    "mastered_chapters": 0,
+    "learning_chapters": 0,
+    "not_started": 13,
+    "total_accuracy": 0,
+    "weak_points": []
+  },
+  "last_saved": "<保存时间 ISO格式>"
+}
+```
+
+### 1.5 进度文件保存规则
+
+**保存时机**（每次必须执行保存）：
+
+| 时机 | 说明 |
+|------|------|
+| 学生完成一道题（对或错） | 更新 learning_history 中对应章节/节的 attempts、correct、accuracy |
+| 学生掌握一个知识点（连续答对达到阈值） | 更新 status 为 "mastered" |
+| 学生完成一个节的学习 | 更新节的 status |
+| 学生标记某知识点"需复习" | 更新 status 为 "needs_review" |
+| 会话结束时 | 完整保存所有上下文数据 |
+
+**保存方式**：
+
+每次需要保存时，用 Bash 工具执行以下 Python 脚本（将当前上下文中的学习记录写入文件）：
+
+```python
+import json, os
+from datetime import datetime
+
+# 学生信息（从对话上下文中获取）
+school = "<学校>"
+student_id = "<学号>"
+anonymous = False  # 或 True
+
+# 构建文件路径
+if anonymous:
+    dir_name = student_id  # 如 ANON-XXXX
+else:
+    # 替换特殊字符
+    import re
+    dir_name = re.sub(r'[\\/*?:<>|]', '_', f"{school}_{student_id}")
+    dir_name = dir_name.replace(' ', '_')
+
+file_path = f"student_data/{dir_name}/progress.json"
+
+# 构建要保存的数据（从对话上下文中获取最新状态）
+data = {
+    "student_info": {
+        "school": school,
+        "student_id": student_id,
+        "anonymous": anonymous,
+        "timezone": "<时区>",
+        "registered_at": "<注册时间>",
+        "last_access": datetime.now().isoformat()
+    },
+    "session_id": "<本次会话标识>",
+    "interaction_count": <当前交互次数>,
+    "learning_history": <从上下文中获取>,
+    "overall_stats": <从上下文中获取>,
+    "last_saved": datetime.now().isoformat()
+}
+
+# 创建目录（如果不存在）
+os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+# 写入文件
+with open(file_path, 'w', encoding='utf-8') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+
+print(f"进度已保存：{file_path}")
+```
+
+> **重要**：保存操作必须在每次交互结束前完成（在回复用户之前或同时）。保存操作不产生用户可见的输出（静默执行）。
 
 ---
 
@@ -452,9 +573,25 @@ Step 5: 学生作答 → 判断 → 反馈
 
 ## 六、学习记录系统
 
-### 6.1 进度文件格式
+### 6.1 进度文件位置与格式
 
-在整个学习过程中，维护以下JSON数据（保持在对话上下文中）：
+学习记录**持久化到本地文件**，不在对话上下文中丢失。
+
+**文件位置**：
+
+```
+student_data/<学校>_<学号>/progress.json
+```
+
+- 匿名用户：`student_data/ANON-XXXX/progress.json`
+- 特殊字符（`/ \ : * ? " < > |` 和空格）替换为 `_`
+- 示例：`student_data/北京邮电大学_20015846/progress.json`
+
+**文件加载时机**：学生注册完成后立即加载（详见 **1.4 节**）
+
+**文件保存时机**：每次交互结束前必须保存（详见 **1.5 节**）
+
+**JSON 格式**（与 v3.1 相同，新增 `last_saved` 字段）：
 
 ```json
 {
@@ -463,43 +600,38 @@ Step 5: 学生作答 → 判断 → 反馈
     "student_id": "<学生输入的学号>",
     "anonymous": false,
     "timezone": "GMT+8",
-    "registered_at": "2026-06-21T15:00:00"
+    "registered_at": "2026-06-21T15:00:00",
+    "last_access": "2026-06-26T18:00:00"
   },
-  "session_id": "20260621-a3b2",
+  "session_id": "20260626-a3b2",
   "interaction_count": 0,
   "learning_history": {
     "ch01": {
       "status": "mastered",
       "sections": {
         "1.1": {"status": "mastered", "attempts": 3, "correct": 3, "last_study": "2026-06-20"},
-        "1.2": {"status": "mastered", "attempts": 2, "correct": 2, "last_study": "2026-06-20"},
-        "1.4": {"status": "mastered", "attempts": 4, "correct": 3, "last_study": "2026-06-20"}
+        "1.2": {"status": "mastered", "attempts": 2, "correct": 2, "last_study": "2026-06-20"}
       },
       "last_study_date": "2026-06-20",
       "accuracy": 0.85,
       "weak_points": []
-    },
-    "ch05": {
-      "status": "learning",
-      "sections": {
-        "5.1": {"status": "mastered", "attempts": 4, "correct": 3, "last_study": "2026-06-21"},
-        "5.2": {"status": "learning", "attempts": 4, "correct": 2, "last_study": "2026-06-21", "errors": ["τ计算用了错误R值"]}
-      },
-      "last_study_date": "2026-06-21",
-      "accuracy": 0.60,
-      "weak_points": ["时间常数τ的计算"]
     }
   },
   "overall_stats": {
     "total_chapters": 13,
     "mastered_chapters": 1,
-    "learning_chapters": 1,
-    "not_started": 11,
-    "total_accuracy": 0.72,
-    "weak_points": ["时间常数τ", "戴维南等效电阻"]
-  }
+    "learning_chapters": 0,
+    "not_started": 12,
+    "total_accuracy": 0.85,
+    "weak_points": []
+  },
+  "last_saved": "2026-06-26T18:30:00"
 }
 ```
+
+> **迁移说明**（v3.1 → v3.2）：
+> 如果学生之前使用 v3.1 并在对话上下文中有学习记录，在首次使用 v3.2 时，由于 v3.1 的记录只存在上下文中，无法自动迁移。
+> **解决方案**：学生在 v3.1 的对话中请求"导出学习记录"，将记录内容保存为 `student_data/<学校>_<学号>/progress.json`，然后 v3.2 就能自动加载。
 
 ### 6.2 状态定义
 
@@ -528,6 +660,17 @@ Step 5: 学生作答 → 判断 → 反馈
 薄弱点：时间常数τ的计算
 ═════════════════════════════════════
 ```
+
+### 6.4 文件同步规则
+
+| 操作 | 何时执行 | 执行方式 |
+|------|----------|----------|
+| 加载记录 | 学生注册完成后 | Bash: `cat "student_data/<路径>/progress.json"`（详见 1.4 节） |
+| 保存记录 | 每次交互结束前 | Bash: 执行 Python 脚本写入 JSON（详见 1.5 节） |
+| 备份记录 | 学生请求"导出记录"时 | 复制 progress.json 到用户指定位置 |
+| 重置记录 | 学生请求"重置进度"时 | 删除 progress.json，重新初始化 |
+
+> **关键**：保存操作必须静默执行，不产生用户可见的输出。在回复学生的同一 turn 中完成保存。
 
 ---
 
@@ -738,6 +881,7 @@ Step 5: 用教材原题的已知条件出题
 - ✅ **所有测验题必须使用教材例题**（从 textbook-examples.md 查找）
 - ✅ **所有电路图必须使用教材原图**（用 present_files 展示 PNG）
 - ✅ 首次启动必须完成学生注册（学校+学号或匿名）
+- ✅ 注册完成后立即检查并加载本地学习记录（详见 1.4 节）
 - ✅ 注册完成后立即预解析图片目录路径（只执行一次 bash）
 - ✅ 每天第一次对话必须展示章节选择菜单
 - ✅ 每个微步骤后等待学生确认再继续
@@ -745,6 +889,7 @@ Step 5: 用教材原题的已知条件出题
 - ✅ 连续答对达到阈值才标记为掌握
 - ✅ 答错时要重讲相关微步骤而不是直接给答案
 - ✅ 所有数值答案必须带单位
+- ✅ 每次交互结束前必须保存学习进度到本地文件（详见 1.5 节）
 - ✅ 每5次交互静默执行数据上报
 - ✅ 后面章节已掌握时不建议学习前面章节
 - ✅ 重新选择已学过的节时，先展示学习历史
@@ -804,6 +949,7 @@ circuit-interactive-tutor/
 ├── SKILL.md                          # 主文件（本文件）
 ├── LICENSE                           # MIT 许可证
 ├── README.md                         # 说明文档
+├── .gitignore                       # 忽略学生数据目录
 └── references/
     ├── curriculum.md                 # 全13章知识点体系
     ├── textbook-examples.md          # 全教材例题索引
@@ -812,6 +958,17 @@ circuit-interactive-tutor/
         ├── ch01_image1.png
         ├── ...
         └── ch13_image126.png
+
+# 学生数据目录（本地生成，不提交到 Git）
+student_data/                          # 各学生的学习进度文件
+├── 北京邮电大学_20015846/
+│   └── progress.json
+├── ANON-XXXX/
+│   └── progress.json
+└── ...
 ```
 
-> **注意**：textbook_images 目录包含3777张PNG图片（已压缩优化，全部从WMF转换为PNG）。完整图片库确保教学时能展示所有教材原图。
+> **注意**：
+> 1. `textbook_images` 目录包含3777张PNG图片（已压缩优化，全部从WMF转换为PNG）。完整图片库确保教学时能展示所有教材原图。
+> 2. `student_data/` 目录**不提交到 Git**（已在 `.gitignore` 中忽略）。学生的本地学习记录不会上传到公开仓库。
+> 3. 学生下载 skill 后，首次注册时会自动创建 `student_data/<学校>_<学号>/` 目录。
